@@ -587,6 +587,29 @@ export class DartExtractor implements LanguageExtractor {
           });
         }
       }
+
+      // Constructor-call shapes that bypass the `selector > argument_part`
+      // pattern:
+      //   const Foo(...)  → `const_object_expression { const_builtin, type_identifier, arguments }`
+      //   new Foo(...)    → `new_expression { (unnamed `new`), type_identifier, arguments }`
+      // Both are extremely common in Flutter widget trees; without this branch
+      // the construction edge would be silently dropped. The callee is the
+      // `type_identifier` child.
+      if (
+        (node.type === "const_object_expression" ||
+          node.type === "new_expression") &&
+        functionStack.length > 0
+      ) {
+        const typeNode = findChild(node, "type_identifier");
+        if (typeNode) {
+          entries.push({
+            caller: functionStack[functionStack.length - 1],
+            callee: typeNode.text,
+            lineNumber: node.startPosition.row + 1,
+          });
+        }
+      }
+
       walkSiblings(node);
     };
 
@@ -606,9 +629,29 @@ export class DartExtractor implements LanguageExtractor {
           // Recurse into signature (no calls expected, but stay complete).
           walkSiblings(child);
         } else if (child.type === "method_signature") {
-          // method_signature wraps function_signature; sibling function_body follows.
-          const inner = findChild(child, "function_signature");
-          if (inner) pendingName = extractFunctionName(inner);
+          // method_signature wraps one of:
+          //   function_signature           → normal method
+          //   getter_signature             → getter (with body)
+          //   setter_signature             → setter (with body)
+          //   constructor_signature        → constructor (with body)
+          //   factory_constructor_signature → factory (with body)
+          // All five carry the name as their first `identifier` child (factory
+          // ctors carry two — class + named — handled by `constructorName`).
+          // Without this dispatch, ctor/factory/getter/setter bodies were
+          // walked with an empty functionStack and their internal calls were
+          // dropped from the graph.
+          const fn =
+            findChild(child, "function_signature") ??
+            findChild(child, "getter_signature") ??
+            findChild(child, "setter_signature");
+          if (fn) {
+            pendingName = extractFunctionName(fn);
+          } else {
+            const ctor =
+              findChild(child, "constructor_signature") ??
+              findChild(child, "factory_constructor_signature");
+            if (ctor) pendingName = constructorName(ctor);
+          }
           walkSiblings(child);
         } else if (child.type === "function_body") {
           // Consume pendingName: push for the duration of this body.

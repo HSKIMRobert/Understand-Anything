@@ -526,6 +526,109 @@ int caller() {
       tree.delete();
       parser.delete();
     });
+
+    it("records a `const Foo()` constructor as a call edge (Flutter widget shape)", () => {
+      const { tree, parser, root } = parse(`void main() {
+  runApp(const MyApp());
+}
+`);
+      const entries = extractor.extractCallGraph(root);
+
+      const callees = entries.map((e) => e.callee);
+      // Both the enclosing `runApp` call and the inner `MyApp` construction
+      // must surface — the latter is the dependency edge that motivates
+      // Flutter call-graph support.
+      expect(callees).toContain("runApp");
+      expect(callees).toContain("MyApp");
+      const myAppCall = entries.find((e) => e.callee === "MyApp");
+      expect(myAppCall!.caller).toBe("main");
+      tree.delete();
+      parser.delete();
+    });
+
+    it("records a `new Foo()` constructor as a call edge", () => {
+      const { tree, parser, root } = parse(`void main() {
+  var x = new Counter(1);
+}
+`);
+      const entries = extractor.extractCallGraph(root);
+
+      const counterCall = entries.find((e) => e.callee === "Counter");
+      expect(counterCall).toBeDefined();
+      expect(counterCall!.caller).toBe("main");
+      tree.delete();
+      parser.delete();
+    });
+
+    it("attributes calls inside a getter body to the getter", () => {
+      const { tree, parser, root } = parse(`class C {
+  int _v = 0;
+  int get value {
+    return helper();
+  }
+}
+`);
+      const entries = extractor.extractCallGraph(root);
+
+      const helperCall = entries.find((e) => e.callee === "helper");
+      expect(helperCall).toBeDefined();
+      expect(helperCall!.caller).toBe("value");
+      tree.delete();
+      parser.delete();
+    });
+
+    it("attributes calls inside a setter body to the setter", () => {
+      const { tree, parser, root } = parse(`class C {
+  int _v = 0;
+  set value(int x) {
+    _v = clamp(x);
+  }
+}
+`);
+      const entries = extractor.extractCallGraph(root);
+
+      const clampCall = entries.find((e) => e.callee === "clamp");
+      expect(clampCall).toBeDefined();
+      expect(clampCall!.caller).toBe("value");
+      tree.delete();
+      parser.delete();
+    });
+
+    it("attributes calls inside a constructor body to the constructor", () => {
+      const { tree, parser, root } = parse(`class Foo {
+  int x;
+  Foo(this.x) {
+    validate(x);
+  }
+}
+`);
+      const entries = extractor.extractCallGraph(root);
+
+      const validateCall = entries.find((e) => e.callee === "validate");
+      expect(validateCall).toBeDefined();
+      expect(validateCall!.caller).toBe("Foo");
+      tree.delete();
+      parser.delete();
+    });
+
+    it("attributes calls inside a factory constructor body to `Class.named`", () => {
+      const { tree, parser, root } = parse(`class Foo {
+  int x;
+  Foo(this.x);
+  factory Foo.fromString(String s) {
+    return Foo(int.parse(s));
+  }
+}
+`);
+      const entries = extractor.extractCallGraph(root);
+
+      // Either the bare `Foo(...)` call inside the factory or the chained
+      // `int.parse(...)` must be attributed to the factory's qualified name.
+      const fromFactory = entries.filter((e) => e.caller === "Foo.fromString");
+      expect(fromFactory.length).toBeGreaterThan(0);
+      tree.delete();
+      parser.delete();
+    });
   });
 
   describe("extractStructure - visibility", () => {
