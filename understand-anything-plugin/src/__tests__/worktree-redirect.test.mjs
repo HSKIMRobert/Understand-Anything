@@ -30,6 +30,7 @@ echo "$PROJECT_ROOT"
 const bashProbe = spawnSync("bash", ["--version"], { encoding: "utf8" });
 const hasBash = !bashProbe.error && bashProbe.status === 0;
 const describeWithBash = hasBash ? describe : describe.skip;
+const itOnWindows = process.platform === "win32" ? it : it.skip;
 
 function runResolve(projectRoot, env = {}) {
   // No `set -e` — the snippet relies on `git ... 2>/dev/null` returning empty
@@ -39,6 +40,20 @@ function runResolve(projectRoot, env = {}) {
     env: { ...process.env, ...env },
     encoding: "utf8",
   }).trim();
+}
+
+function toNativePath(pathValue) {
+  if (process.platform !== "win32") {
+    return pathValue;
+  }
+  const nativePath = execFileSync("bash", ["-lc", 'cygpath -w "$1"', "_", pathValue], {
+    encoding: "utf8",
+  }).trim();
+  return realpathSync.native(nativePath);
+}
+
+function expectSamePath(actual, expected) {
+  expect(toNativePath(actual)).toBe(toNativePath(expected));
 }
 
 let tmpRoot;
@@ -67,20 +82,24 @@ describeWithBash("worktree-redirect snippet (issue #133)", () => {
     if (tmpRoot) rmSync(tmpRoot, { recursive: true, force: true });
   });
 
+  itOnWindows("treats Windows short and long path names as the same directory", () => {
+    expectSamePath("C:/PROGRA~1", "C:/Program Files");
+  });
+
   it("leaves PROJECT_ROOT alone in a normal checkout", () => {
-    expect(runResolve(mainRepo)).toBe(mainRepo);
+    expectSamePath(runResolve(mainRepo), mainRepo);
   });
 
   it("redirects PROJECT_ROOT to the main repo when started in a worktree", () => {
-    expect(runResolve(worktree)).toBe(mainRepo);
+    expectSamePath(runResolve(worktree), mainRepo);
   });
 
   it("redirects from a subdirectory inside a worktree", () => {
-    expect(runResolve(subdir)).toBe(mainRepo);
+    expectSamePath(runResolve(subdir), mainRepo);
   });
 
   it("respects UNDERSTAND_NO_WORKTREE_REDIRECT=1", () => {
-    expect(runResolve(worktree, { UNDERSTAND_NO_WORKTREE_REDIRECT: "1" })).toBe(worktree);
+    expectSamePath(runResolve(worktree, { UNDERSTAND_NO_WORKTREE_REDIRECT: "1" }), worktree);
   });
 
   it("leaves PROJECT_ROOT alone when not inside a git repo", () => {
@@ -88,6 +107,6 @@ describeWithBash("worktree-redirect snippet (issue #133)", () => {
     // inside a parent git repo (e.g. when /tmp is symlinked into one).
     const nonGit = join(tmpRoot, "no-git");
     mkdirSync(nonGit, { recursive: true });
-    expect(runResolve(nonGit)).toBe(nonGit);
+    expectSamePath(runResolve(nonGit), nonGit);
   });
 });
