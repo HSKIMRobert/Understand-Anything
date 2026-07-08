@@ -134,7 +134,7 @@ describe("LanguageConfigSchema (base, no refinement)", () => {
   });
 
   it("rejects config missing id", () => {
-    const { id, ...withoutId } = validConfig;
+    const { id: _id, ...withoutId } = validConfig;
     const result = LanguageConfigSchema.safeParse(withoutId);
     expect(result.success).toBe(false);
   });
@@ -145,13 +145,13 @@ describe("LanguageConfigSchema (base, no refinement)", () => {
   });
 
   it("rejects config missing displayName", () => {
-    const { displayName, ...withoutName } = validConfig;
+    const { displayName: _displayName, ...withoutName } = validConfig;
     const result = LanguageConfigSchema.safeParse(withoutName);
     expect(result.success).toBe(false);
   });
 
   it("rejects config missing filePatterns", () => {
-    const { filePatterns, ...withoutPatterns } = validConfig;
+    const { filePatterns: _filePatterns, ...withoutPatterns } = validConfig;
     const result = LanguageConfigSchema.safeParse(withoutPatterns);
     expect(result.success).toBe(false);
   });
