@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import {
   TreeSitterConfigSchema,
@@ -8,6 +10,14 @@ import {
 } from "../languages/types.js";
 import { builtinLanguageConfigs } from "../languages/configs/index.js";
 import { builtinFrameworkConfigs } from "../languages/frameworks/index.js";
+
+/** Count config modules (one config per file, index.ts excluded) in a directory. */
+function countConfigModules(relativeDir: string): number {
+  const dir = fileURLToPath(new URL(relativeDir, import.meta.url));
+  return readdirSync(dir).filter(
+    (file) => file.endsWith(".ts") && file !== "index.ts"
+  ).length;
+}
 
 // =============================================================================
 // Schema type-level tests
@@ -322,8 +332,10 @@ describe("Built-in Language Configs", () => {
     "json-schema",
   ]);
 
-  it("has the expected total number of built-in configs", () => {
-    expect(builtinLanguageConfigs).toHaveLength(41);
+  it("registers every config module in the configs directory", () => {
+    expect(builtinLanguageConfigs).toHaveLength(
+      countConfigModules("../languages/configs/")
+    );
   });
 
   it("every config passes base LanguageConfigSchema validation", () => {
@@ -421,8 +433,10 @@ describe("Built-in Language Configs", () => {
 // =============================================================================
 
 describe("Built-in Framework Configs", () => {
-  it("has the expected total number of built-in framework configs", () => {
-    expect(builtinFrameworkConfigs).toHaveLength(10);
+  it("registers every framework module in the frameworks directory", () => {
+    expect(builtinFrameworkConfigs).toHaveLength(
+      countConfigModules("../languages/frameworks/")
+    );
   });
 
   it("every framework config passes FrameworkConfigSchema validation", () => {
