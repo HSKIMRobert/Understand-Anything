@@ -14,7 +14,7 @@ Start the Understand Anything dashboard to visualize the knowledge graph for the
    - If `$ARGUMENTS` contains a path, use that as the project directory
    - Otherwise, use the current working directory
 
-2. Check that `.understand-anything/knowledge-graph.json` exists in the project directory. If not, tell the user:
+2. **Resolve the data directory `$UA_DIR`.** Within the project directory, run `UA_DIR="<project-dir>/$([ -d "<project-dir>/.understand-anything" ] && echo .understand-anything || echo .ua)"` — this selects the legacy `.understand-anything/` when it already exists, otherwise the new `.ua/`. Check that `$UA_DIR/knowledge-graph.json` exists in the project directory. If not, tell the user:
    ```
    No knowledge graph found. Run /understand first to analyze this project.
    ```
@@ -92,7 +92,7 @@ Start the Understand Anything dashboard to visualize the knowledge graph for the
 7. Report to the user, including the full tokenized URL:
    ```
    Dashboard started at http://127.0.0.1:<PORT>?token=<TOKEN>
-   Viewing: <project-dir>/.understand-anything/knowledge-graph.json
+   Viewing: $UA_DIR/knowledge-graph.json
 
    The dashboard is running in the background. Press Ctrl+C in the terminal to stop it.
    ```
