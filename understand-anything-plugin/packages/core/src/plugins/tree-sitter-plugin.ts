@@ -227,12 +227,12 @@ export class TreeSitterPlugin implements AnalyzerPlugin {
     return parser;
   }
 
-  private static readonly EMPTY_STRUCTURE: StructuralAnalysis = {
-    functions: [],
-    classes: [],
-    imports: [],
-    exports: [],
-  };
+  // Fresh object AND fresh arrays on every call — a shared static would leak
+  // the same array instances to every caller, so one caller mutating its
+  // result would corrupt everyone else's.
+  private static emptyStructure(): StructuralAnalysis {
+    return { functions: [], classes: [], imports: [], exports: [] };
+  }
 
   analyzeFile(
     filePath: string,
@@ -278,12 +278,12 @@ export class TreeSitterPlugin implements AnalyzerPlugin {
   ): { structure: StructuralAnalysis; callGraph: CallGraphEntry[] } {
     const parser = this.getParser(filePath);
     if (!parser) {
-      return { structure: { ...TreeSitterPlugin.EMPTY_STRUCTURE }, callGraph: [] };
+      return { structure: TreeSitterPlugin.emptyStructure(), callGraph: [] };
     }
 
     const tree = parser.parse(content);
     if (!tree) {
-      return { structure: { ...TreeSitterPlugin.EMPTY_STRUCTURE }, callGraph: [] };
+      return { structure: TreeSitterPlugin.emptyStructure(), callGraph: [] };
     }
 
     const langKey = this.languageKeyFromPath(filePath);
@@ -291,7 +291,7 @@ export class TreeSitterPlugin implements AnalyzerPlugin {
 
     const structure = extractor
       ? extractor.extractStructure(tree.rootNode)
-      : { ...TreeSitterPlugin.EMPTY_STRUCTURE };
+      : TreeSitterPlugin.emptyStructure();
     const callGraph = extractor ? extractor.extractCallGraph(tree.rootNode) : [];
 
     tree.delete();
