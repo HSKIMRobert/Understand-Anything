@@ -24,6 +24,10 @@
     "./languages": {
       "types": "./dist/languages/index.d.ts",
       "default": "./dist/languages/index.js"
+    },
+    "./figma": {
+      "types": "./dist/figma/index.d.ts",
+      "default": "./dist/figma/index.js"
     }
   },
   "scripts": {

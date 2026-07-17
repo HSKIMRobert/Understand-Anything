@@ -8,8 +8,11 @@
  * Usage:
  *   node compute-batches.mjs <project-root> [--changed-files=<path>]
  *
- * Input:  <project-root>/.understand-anything/intermediate/scan-result.json
- * Output: <project-root>/.understand-anything/intermediate/batches.json
+ * Input/output live under the project's data dir (`.ua/`, or legacy
+ * `.understand-anything/` when that directory already exists — resolved by
+ * core's resolveUaDir):
+ *   Input:  <ua-dir>/intermediate/scan-result.json
+ *   Output: <ua-dir>/intermediate/batches.json
  */
 
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
@@ -36,7 +39,7 @@ try {
 } catch {
   core = await import(pathToFileURL(resolve(PLUGIN_ROOT, 'packages/core/dist/index.js')).href);
 }
-const { TreeSitterPlugin, PluginRegistry, builtinLanguageConfigs, registerAllParsers } = core;
+const { TreeSitterPlugin, PluginRegistry, builtinLanguageConfigs, registerAllParsers, resolveUaDir } = core;
 
 import Graph from 'graphology';
 import louvain from 'graphology-communities-louvain';
@@ -136,14 +139,28 @@ function buildNonCodeBatches(nonCodeFiles) {
   const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
   const baseOf = p => p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p;
 
+  // Hoist the path list once (it was re-materialized via [...byPath.keys()]
+  // seven times below) and index paths by parent dir a single time. Groups A
+  // and D previously re-filtered the full path list once per Dockerfile dir /
+  // migration dir — O(dirs · N). On a many-service monorepo (one Dockerfile
+  // per service) that was the dominant cost; the dir index makes those
+  // lookups O(1). Output is byte-for-byte identical (verified).
+  const allPaths = [...byPath.keys()];
+  const pathsByDir = new Map();
+  for (const p of allPaths) {
+    const d = dirOf(p);
+    let arr = pathsByDir.get(d);
+    if (!arr) { arr = []; pathsByDir.set(d, arr); }
+    arr.push(p);
+  }
+
   // Group A: per-directory Dockerfile clusters.
-  const dirsWithDockerfile = new Set(
-    [...byPath.keys()]
-      .filter(p => baseOf(p) === 'Dockerfile')
-      .map(dirOf),
-  );
+  const dirsWithDockerfile = new Set();
+  for (const p of allPaths) {
+    if (baseOf(p) === 'Dockerfile') dirsWithDockerfile.add(dirOf(p));
+  }
   for (const dir of [...dirsWithDockerfile].sort()) {
-    const inDir = [...byPath.keys()].filter(p => dirOf(p) === dir);
+    const inDir = pathsByDir.get(dir) ?? [];
     const cluster = inDir.filter(p => {
       const b = baseOf(p);
       return b === 'Dockerfile'
@@ -157,7 +174,7 @@ function buildNonCodeBatches(nonCodeFiles) {
   }
 
   // Group B: .github/workflows/*
-  const ghWorkflows = [...byPath.keys()].filter(
+  const ghWorkflows = allPaths.filter(
     p => p.startsWith('.github/workflows/') && (p.endsWith('.yml') || p.endsWith('.yaml')),
   ).filter(p => !consumed.has(p));
   if (ghWorkflows.length) {
@@ -166,7 +183,7 @@ function buildNonCodeBatches(nonCodeFiles) {
   }
 
   // Group C: .gitlab-ci.yml + .circleci/*
-  const ciFiles = [...byPath.keys()].filter(
+  const ciFiles = allPaths.filter(
     p => (p === '.gitlab-ci.yml' || p.startsWith('.circleci/'))
       && !consumed.has(p),
   );
@@ -178,15 +195,16 @@ function buildNonCodeBatches(nonCodeFiles) {
   // Group D: SQL migrations per migrations/ or migration/ directory.
   // Defensive consumed.has check: no upstream group consumes SQL today, but
   // future Group additions could; keep the check for forward-compat.
-  const migrationDirs = new Set(
-    [...byPath.keys()]
-      .filter(p => p.endsWith('.sql'))
-      .map(dirOf)
-      .filter(d => /(^|\/)migrations?$/.test(d)),
-  );
+  const migrationDirs = new Set();
+  for (const p of allPaths) {
+    if (p.endsWith('.sql')) {
+      const d = dirOf(p);
+      if (/(^|\/)migrations?$/.test(d)) migrationDirs.add(d);
+    }
+  }
   for (const dir of migrationDirs) {
-    const sqls = [...byPath.keys()]
-      .filter(p => dirOf(p) === dir && p.endsWith('.sql') && !consumed.has(p))
+    const sqls = (pathsByDir.get(dir) ?? [])
+      .filter(p => p.endsWith('.sql') && !consumed.has(p))
       .sort();
     if (sqls.length) {
       groups.push({ files: sqls.map(p => byPath.get(p)), mergeable: false });
@@ -196,7 +214,7 @@ function buildNonCodeBatches(nonCodeFiles) {
 
   // Group E: all remaining grouped by immediate parent dir, max 20 per batch
   const remainingByDir = new Map();
-  for (const p of [...byPath.keys()].sort()) {
+  for (const p of [...allPaths].sort()) {
     if (consumed.has(p)) continue;
     const dir = dirOf(p);
     if (!remainingByDir.has(dir)) remainingByDir.set(dir, []);
@@ -369,7 +387,8 @@ async function main() {
     }
   }
 
-  const scanPath = join(projectRoot, '.understand-anything', 'intermediate', 'scan-result.json');
+  const uaDir = resolveUaDir(projectRoot);
+  const scanPath = join(uaDir, 'intermediate', 'scan-result.json');
   if (!existsSync(scanPath)) {
     process.stderr.write(`Error: scan-result.json not found at ${scanPath}\n`);
     process.exit(1);
@@ -567,7 +586,7 @@ async function main() {
     batches: finalBatches,
   };
 
-  const outPath = join(projectRoot, '.understand-anything', 'intermediate', 'batches.json');
+  const outPath = join(uaDir, 'intermediate', 'batches.json');
   writeFileSync(outPath, JSON.stringify(output, null, 2), 'utf-8');
   const batchSizes = finalBatches.map(b => b.files.length);
   const maxSize = batchSizes.length ? Math.max(...batchSizes) : 0;

@@ -158,16 +158,18 @@ describe(
     });
   });
 
-  it("ignores untracked Understand Anything output files", async () => {
+  it.each([".understand-anything", ".ua"])(
+    "ignores untracked Understand Anything output files in %s",
+    async (dataDir) => {
     const { repoDir, baseline } = createRepository();
     writeProjectFile(
       repoDir,
-      ".understand-anything/knowledge-graph.json",
+      `${dataDir}/knowledge-graph.json`,
       "{}\n",
     );
     writeProjectFile(
       repoDir,
-      ".understand-anything/intermediate/batch-0.json",
+      `${dataDir}/intermediate/batch-0.json`,
       "{}\n",
     );
 
@@ -178,47 +180,50 @@ describe(
       changedFileCount: 0,
       changedFiles: [],
     });
-  });
+    },
+  );
 
-  it("ignores commits that only change Understand Anything output files", async () => {
-    const { repoDir, baseline } = createRepository();
-    writeProjectFile(
-      repoDir,
-      ".understand-anything/knowledge-graph.json",
-      "{}\n",
-    );
-    const headCommit = commitAll(repoDir, "persist generated graph");
+  it.each([".understand-anything", ".ua"])(
+    "ignores commits that only change Understand Anything output files in %s",
+    async (dataDir) => {
+      const { repoDir, baseline } = createRepository();
+      writeProjectFile(repoDir, `${dataDir}/knowledge-graph.json`, "{}\n");
+      const headCommit = commitAll(repoDir, "persist generated graph");
 
-    await expect(
-      getGraphFreshness(repoDir, { graphCommitHash: baseline }),
-    ).resolves.toEqual({
-      status: "fresh",
-      graphCommitHash: baseline,
-      headCommitHash: headCommit,
-      changedFileCount: 0,
-      changedFiles: [],
-      commitsBehind: 0,
-      commitsAhead: 0,
-    });
-  });
+      await expect(
+        getGraphFreshness(repoDir, { graphCommitHash: baseline }),
+      ).resolves.toEqual({
+        status: "fresh",
+        graphCommitHash: baseline,
+        headCommitHash: headCommit,
+        changedFileCount: 0,
+        changedFiles: [],
+        commitsBehind: 0,
+        commitsAhead: 0,
+      });
+    },
+  );
 
-  it("still reports source changes beside ignored output files", async () => {
-    const { repoDir, baseline } = createRepository();
-    writeProjectFile(
-      repoDir,
-      ".understand-anything/knowledge-graph.json",
-      "{}\n",
-    );
-    writeProjectFile(repoDir, "src/real-change.ts", "export const changed = true;\n");
+  it.each([".understand-anything", ".ua"])(
+    "still reports source changes beside ignored output files in %s",
+    async (dataDir) => {
+      const { repoDir, baseline } = createRepository();
+      writeProjectFile(repoDir, `${dataDir}/knowledge-graph.json`, "{}\n");
+      writeProjectFile(
+        repoDir,
+        "src/real-change.ts",
+        "export const changed = true;\n",
+      );
 
-    await expect(
-      getGraphFreshness(repoDir, { graphCommitHash: baseline }),
-    ).resolves.toMatchObject({
-      status: "dirty",
-      changedFileCount: 1,
-      changedFiles: ["src/real-change.ts"],
-    });
-  });
+      await expect(
+        getGraphFreshness(repoDir, { graphCommitHash: baseline }),
+      ).resolves.toMatchObject({
+        status: "dirty",
+        changedFileCount: 1,
+        changedFiles: ["src/real-change.ts"],
+      });
+    },
+  );
 
   it("resolves an abbreviated graph hash to the full matching commit", async () => {
     const { repoDir, baseline } = createRepository();

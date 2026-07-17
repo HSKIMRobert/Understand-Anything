@@ -1131,6 +1131,70 @@ class TestMultiPart(unittest.TestCase):
 # ── Unrecognized batch filename handling ───────────────────────────────────
 
 
+class TestIncrementalBatchExisting(unittest.TestCase):
+    """The documented incremental baseline file must be merged, not dropped."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="ua-mbg-existing-"))
+        self.intermediate = self.tmp / ".understand-anything" / "intermediate"
+        self.intermediate.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_batch(self, name: str, nodes: list, edges: list) -> None:
+        import json as _j
+        (self.intermediate / name).write_text(
+            _j.dumps({"nodes": nodes, "edges": edges}),
+            encoding="utf-8",
+        )
+
+    def _run_merge(self) -> tuple[int, str, dict]:
+        import subprocess
+        import json as _j
+        result = subprocess.run(
+            [sys.executable, str(_MODULE_PATH), str(self.tmp)],
+            capture_output=True, text=True,
+        )
+        out_path = self.intermediate / "assembled-graph.json"
+        assembled = _j.loads(out_path.read_text(encoding="utf-8")) if out_path.exists() else {}
+        return result.returncode, result.stderr, assembled
+
+    def test_batch_existing_baseline_is_loaded_before_fresh_batches(self) -> None:
+        self._write_batch("batch-existing.json", [
+            _file_node("src/unchanged.ts"),
+            _file_node("src/shared.ts", summary="old baseline summary"),
+        ], [])
+        self._write_batch("batch-1.json", [
+            _file_node("src/new.ts"),
+            _file_node("src/shared.ts", summary="fresh summary"),
+        ], [
+            {
+                "source": "file:src/new.ts",
+                "target": "file:src/shared.ts",
+                "type": "imports",
+                "direction": "forward",
+                "weight": 0.7,
+            }
+        ])
+
+        rc, stderr, assembled = self._run_merge()
+
+        self.assertEqual(rc, 0)
+        self.assertNotIn("unrecognized filenames", stderr)
+        self.assertIn("batch-existing.json: 2 nodes, 0 edges", stderr)
+        node_by_id = {n["id"]: n for n in assembled["nodes"]}
+        self.assertEqual(
+            set(node_by_id),
+            {"file:src/unchanged.ts", "file:src/shared.ts", "file:src/new.ts"},
+        )
+        self.assertEqual(node_by_id["file:src/shared.ts"]["summary"], "fresh summary")
+        edge_keys = {(e["source"], e["target"], e["type"]) for e in assembled["edges"]}
+        self.assertIn(("file:src/new.ts", "file:src/shared.ts", "imports"), edge_keys)
+
+
 class TestUnrecognizedBatchFilename(unittest.TestCase):
     """File-analyzer fuses multiple batches into one output (e.g.,
     `batch-fused-8-13.json`, `batch-8-13.json`) — the merge script's regex
@@ -1243,6 +1307,110 @@ class TestUnrecognizedBatchFilename(unittest.TestCase):
         node_ids = {n["id"] for n in assembled["nodes"]}
         self.assertNotIn("file:src/x.ts", node_ids)
         self.assertNotIn("file:src/y.ts", node_ids)
+
+
+class TestEmptyBatchGuard(unittest.TestCase):
+    """A batch file that parses but contributes 0 nodes + 0 edges is how a
+    silent partial merge looks from the outside (#484) — it must be flagged
+    loudly on stderr AND in the phase report, without failing the merge.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="ua-mbg-empty-"))
+        self.intermediate = self.tmp / ".understand-anything" / "intermediate"
+        self.intermediate.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_batch(self, name: str, nodes: list, edges: list) -> None:
+        import json as _j
+        (self.intermediate / name).write_text(
+            _j.dumps({"nodes": nodes, "edges": edges}),
+            encoding="utf-8",
+        )
+
+    def _run_merge(self) -> tuple[int, str]:
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, str(_MODULE_PATH), str(self.tmp)],
+            capture_output=True, text=True,
+        )
+        return result.returncode, result.stderr
+
+    def test_empty_batch_warns_but_does_not_fail(self) -> None:
+        self._write_batch("batch-1.json", [_file_node("src/a.ts")], [])
+        self._write_batch("batch-2.json", [], [])
+        rc, stderr = self._run_merge()
+        self.assertEqual(rc, 0)
+        self.assertIn("batch-2.json loaded but contributed 0 nodes and 0 edges", stderr)
+        # Re-emitted in the phase report section, not just the load log
+        self.assertIn("loaded but contributed no nodes or edges", stderr)
+
+    def test_no_warning_when_all_batches_contribute(self) -> None:
+        self._write_batch("batch-1.json", [_file_node("src/a.ts")], [])
+        rc, stderr = self._run_merge()
+        self.assertEqual(rc, 0)
+        self.assertNotIn("contributed 0 nodes and 0 edges", stderr)
+
+
+class TestUaDirResolution(unittest.TestCase):
+    """The merge script reads/writes under the resolved data dir: `.ua/` for
+    fresh projects, legacy `.understand-anything/` when that dir already exists
+    (no migration). Exercised end-to-end via subprocess.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp(prefix="ua-mbg-uadir-"))
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_batch(self, dir_name: str, name: str, nodes: list) -> Path:
+        import json as _j
+        inter = self.tmp / dir_name / "intermediate"
+        inter.mkdir(parents=True, exist_ok=True)
+        (inter / name).write_text(_j.dumps({"nodes": nodes, "edges": []}), encoding="utf-8")
+        return inter
+
+    def _run(self) -> int:
+        import subprocess
+        return subprocess.run(
+            [sys.executable, str(_MODULE_PATH), str(self.tmp)],
+            capture_output=True, text=True,
+        ).returncode
+
+    def test_fresh_project_uses_dot_ua(self) -> None:
+        self._write_batch(".ua", "batch-1.json", [_file_node("src/a.ts")])
+        rc = self._run()
+        self.assertEqual(rc, 0)
+        self.assertTrue((self.tmp / ".ua" / "intermediate" / "assembled-graph.json").is_file())
+        # Legacy dir must not be created for a fresh project.
+        self.assertFalse((self.tmp / ".understand-anything").exists())
+
+    def test_legacy_project_keeps_understand_anything(self) -> None:
+        self._write_batch(".understand-anything", "batch-1.json", [_file_node("src/a.ts")])
+        rc = self._run()
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            (self.tmp / ".understand-anything" / "intermediate" / "assembled-graph.json").is_file()
+        )
+        self.assertFalse((self.tmp / ".ua").exists())
+
+    def test_legacy_dir_wins_when_both_present(self) -> None:
+        self._write_batch(".understand-anything", "batch-1.json", [_file_node("src/a.ts")])
+        # A stray empty .ua/ must not divert the merge away from the legacy dir.
+        (self.tmp / ".ua" / "intermediate").mkdir(parents=True, exist_ok=True)
+        rc = self._run()
+        self.assertEqual(rc, 0)
+        self.assertTrue(
+            (self.tmp / ".understand-anything" / "intermediate" / "assembled-graph.json").is_file()
+        )
+        self.assertFalse((self.tmp / ".ua" / "intermediate" / "assembled-graph.json").exists())
 
 
 if __name__ == "__main__":

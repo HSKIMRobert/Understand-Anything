@@ -41,8 +41,8 @@ function commitAll(message: string): string {
   return git("rev-parse", "HEAD");
 }
 
-function graphDirectory(): string {
-  const directory = path.join(tempProject, ".understand-anything");
+function graphDirectory(dataDir = ".understand-anything"): string {
+  const directory = path.join(tempProject, dataDir);
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
@@ -50,9 +50,10 @@ function graphDirectory(): string {
 function writeGraph(
   fileName: "knowledge-graph.json" | "domain-graph.json",
   commitHash: string,
+  dataDir = ".understand-anything",
 ): void {
   fs.writeFileSync(
-    path.join(graphDirectory(), fileName),
+    path.join(graphDirectory(dataDir), fileName),
     JSON.stringify({
       project: {
         gitCommitHash: commitHash,
@@ -153,32 +154,34 @@ describe(
       });
     });
 
-    it("serves a knowledge-only report to an authorized request", async () => {
-      writeGraph("knowledge-graph.json", baselineCommit);
-      const baseUrl = await startDashboardServer("test-token");
+    it.each([".understand-anything", ".ua"])(
+      "serves a knowledge-only report from %s to an authorized request",
+      async (dataDir) => {
+        writeGraph("knowledge-graph.json", baselineCommit, dataDir);
+        const baseUrl = await startDashboardServer("test-token");
 
-      const response = await requestJson(
-        baseUrl,
-        "/staleness.json?token=test-token",
-      );
+        const response = await requestJson(
+          baseUrl,
+          "/staleness.json?token=test-token",
+        );
 
-      expect(response.status).toBe(200);
-      expect(response.cacheControl).toBe("no-store");
-      expect(isDashboardFreshnessReport(response.body)).toBe(true);
-      expect(response.cacheControl).toBe("no-store");
-      expect(response.body).toMatchObject({
-        graphs: {
-          knowledge: {
-            status: "fresh",
-            graphCommitHash: baselineCommit,
-            headCommitHash: baselineCommit,
+        expect(response.status).toBe(200);
+        expect(response.cacheControl).toBe("no-store");
+        expect(isDashboardFreshnessReport(response.body)).toBe(true);
+        expect(response.body).toMatchObject({
+          graphs: {
+            knowledge: {
+              status: "fresh",
+              graphCommitHash: baselineCommit,
+              headCommitHash: baselineCommit,
+            },
           },
-        },
-      });
-      expect(
-        (response.body as { graphs: Record<string, unknown> }).graphs,
-      ).not.toHaveProperty("domain");
-    });
+        });
+        expect(
+          (response.body as { graphs: Record<string, unknown> }).graphs,
+        ).not.toHaveProperty("domain");
+      },
+    );
 
     it("reports knowledge and domain graph freshness independently", async () => {
       writeProjectFile("src/index.ts", "export const value = 2;\n");

@@ -94,6 +94,23 @@ const TEST_PATTERN_GROUPS: Array<{ label: string; patterns: string[] }> = [
       "**/*Benchmark.cpp",
     ],
   },
+  {
+    // Python testing conventions are bimodal. Most projects (django,
+    // flask, pandas, numpy) cluster tests inside a top-level tests/ dir,
+    // where the existing directory rules already catch them. But Google-
+    // style codebases (tensorflow, jax, some Meta libs) interleave
+    // *_test.py directly alongside the module under test — e.g. tensor-
+    // flow/python/ops/array_ops.py + array_ops_test.py — so file-pattern
+    // rules add the majority of the token savings for that half of the
+    // ecosystem.
+    label: "Python",
+    patterns: [
+      "**/test_*.py",
+      "**/*_test.py",
+      "**/tests.py",
+      "**/conftest.py",
+    ],
+  },
 ];
 
 /**

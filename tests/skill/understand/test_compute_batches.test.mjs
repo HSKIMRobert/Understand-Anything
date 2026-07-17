@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -22,6 +22,19 @@ function setupProject(fixtureName) {
   const fixturePath = join(FIXTURES, fixtureName);
   const dest = join(root, '.understand-anything', 'intermediate', 'scan-result.json');
   writeFileSync(dest, readFileSync(fixturePath, 'utf-8'));
+  return root;
+}
+
+// Variant of setupProject that seeds the fixture into an arbitrary data
+// directory name (`.ua` for fresh projects, `.understand-anything` for legacy).
+function setupProjectInDir(fixtureName, dirName) {
+  const root = mkdtempSync(join(tmpdir(), 'ua-cb-dir-test-'));
+  mkdirSync(join(root, dirName, 'intermediate'), { recursive: true });
+  const fixturePath = join(FIXTURES, fixtureName);
+  writeFileSync(
+    join(root, dirName, 'intermediate', 'scan-result.json'),
+    readFileSync(fixturePath, 'utf-8'),
+  );
   return root;
 }
 
@@ -701,5 +714,52 @@ describe('compute-batches.mjs — --changed-files', () => {
     ]));
     expect(neighbors.find(n => n.path === 'src/a/core.ts').batchIndex).not.toBe(batch.batchIndex);
     expect(neighbors.find(n => n.path === 'src/b/middle.ts').batchIndex).toBe(batch.batchIndex);
+  });
+});
+
+describe('compute-batches.mjs — data-dir resolution (.ua vs legacy)', () => {
+  let root;
+
+  afterEach(() => {
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('fresh project reads scan-result from .ua/ and writes batches.json there', () => {
+    root = setupProjectInDir('scan-result-3-cliques.json', '.ua');
+    const result = runScript(root);
+    expect(result.status).toBe(0);
+
+    // Output landed in .ua/, and the legacy dir was never created.
+    expect(existsSync(join(root, '.ua', 'intermediate', 'batches.json'))).toBe(true);
+    expect(existsSync(join(root, '.understand-anything'))).toBe(false);
+
+    const batches = JSON.parse(
+      readFileSync(join(root, '.ua', 'intermediate', 'batches.json'), 'utf-8'),
+    );
+    expect(batches.totalFiles).toBe(9);
+    expect(batches.batches.length).toBe(3);
+  });
+
+  it('legacy project keeps using .understand-anything/ (no migration)', () => {
+    // Legacy-compat regression: an existing .understand-anything/ dir wins for
+    // both read and write even though .ua/ is the new default.
+    root = setupProjectInDir('scan-result-3-cliques.json', '.understand-anything');
+    const result = runScript(root);
+    expect(result.status).toBe(0);
+
+    expect(existsSync(join(root, '.understand-anything', 'intermediate', 'batches.json'))).toBe(true);
+    expect(existsSync(join(root, '.ua'))).toBe(false);
+  });
+
+  it('legacy dir wins when both .understand-anything/ and .ua/ exist', () => {
+    root = setupProjectInDir('scan-result-3-cliques.json', '.understand-anything');
+    // A stray empty .ua/ must not divert reads/writes away from the legacy dir.
+    mkdirSync(join(root, '.ua', 'intermediate'), { recursive: true });
+
+    const result = runScript(root);
+    expect(result.status).toBe(0);
+
+    expect(existsSync(join(root, '.understand-anything', 'intermediate', 'batches.json'))).toBe(true);
+    expect(existsSync(join(root, '.ua', 'intermediate', 'batches.json'))).toBe(false);
   });
 });

@@ -74,6 +74,8 @@ const PROJECT_PATHSPEC = [
   ".",
   ":(exclude).understand-anything",
   ":(exclude).understand-anything/**",
+  ":(exclude).ua",
+  ":(exclude).ua/**",
 ] as const;
 
 class GitCommandError extends Error {

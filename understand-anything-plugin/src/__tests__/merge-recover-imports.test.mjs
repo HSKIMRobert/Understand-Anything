@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -200,5 +200,57 @@ describe("merge-batch-graphs.py imports recovery", () => {
 
     const { assembled } = runMerge();
     expect(assembled.edges.filter((e) => e.type === "imports")).toHaveLength(0);
+  });
+});
+
+describe("merge-batch-graphs.py data-dir resolution (.ua vs legacy)", () => {
+  // Self-contained: uses its own temp roots rather than the module-global
+  // .understand-anything projectRoot wired up in the top-level beforeEach.
+  function runIn(root) {
+    const result = spawnSync(PYTHON.command, [...PYTHON.args, MERGE_SCRIPT, root], {
+      encoding: "utf-8",
+    });
+    return result;
+  }
+
+  it("fresh project reads/writes under .ua/", () => {
+    const root = mkdtempSync(join(tmpdir(), "ua-merge-uadir-"));
+    try {
+      const inter = join(root, ".ua", "intermediate");
+      mkdirSync(inter, { recursive: true });
+      writeFileSync(
+        join(inter, "batch-0.json"),
+        JSON.stringify({ nodes: [fileNode("src/a.py")], edges: [] }),
+      );
+      const result = runIn(root);
+      expect(result.status).toBe(0);
+      // Output landed in .ua/, legacy dir never created.
+      const out = JSON.parse(
+        readFileSync(join(inter, "assembled-graph.json"), "utf-8"),
+      );
+      expect(out.nodes.map((n) => n.id)).toContain("file:src/a.py");
+      expect(existsSync(join(root, ".understand-anything"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("legacy .understand-anything/ wins even when .ua/ also exists", () => {
+    const root = mkdtempSync(join(tmpdir(), "ua-merge-legacy-"));
+    try {
+      const legacyInter = join(root, ".understand-anything", "intermediate");
+      mkdirSync(legacyInter, { recursive: true });
+      mkdirSync(join(root, ".ua", "intermediate"), { recursive: true });
+      writeFileSync(
+        join(legacyInter, "batch-0.json"),
+        JSON.stringify({ nodes: [fileNode("src/a.py")], edges: [] }),
+      );
+      const result = runIn(root);
+      expect(result.status).toBe(0);
+      expect(existsSync(join(legacyInter, "assembled-graph.json"))).toBe(true);
+      expect(existsSync(join(root, ".ua", "intermediate", "assembled-graph.json"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

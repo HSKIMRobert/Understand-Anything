@@ -235,6 +235,9 @@ function Cmd-Install([string]$Id) {
 
     Write-Host "`n✓ Installed Understand-Anything for $Id"
     Write-Host '  Restart your CLI or IDE to pick up the skills.'
+    if ($Id -eq 'codex') {
+        Write-Host "`n  Tip: Codex invokes skills with `$ instead of / — type `$understand, not /understand."
+    }
     if ($Id -eq 'vscode') {
         Write-Host "`n  Tip: VS Code can also auto-discover the plugin by opening this repo"
         Write-Host '       directly (it reads .copilot-plugin/plugin.json), no symlinks needed.'

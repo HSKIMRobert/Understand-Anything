@@ -16,7 +16,9 @@
  *
  * What this script owns:
  *   - File enumeration (git ls-files preferred, recursive walk fallback)
- *   - `.understandignore` filtering (delegated to core's createIgnoreFilter)
+ *   - `.understandignore` filtering (delegated to core's createIgnoreFilter,
+ *     which reads the resolved data dir — `.ua/`, or legacy
+ *     `.understand-anything/` when that directory already exists)
  *   - Per-file language detection (extension + filename table)
  *   - Per-file category assignment (priority-ordered rules from
  *     project-scanner.md Step 4)
@@ -24,7 +26,11 @@
  *   - Complexity estimation (project-scanner.md Step 7 thresholds)
  *
  * Usage:
- *   node scan-project.mjs <projectRoot> <outputPath>
+ *   node scan-project.mjs <projectRoot> <outputPath> [--exclude <patterns>]
+ *
+ *   --exclude <patterns>  Comma-separated glob patterns to additionally exclude.
+ *                         These take highest priority over built-in defaults and
+ *                         .understandignore rules. Supports gitignore syntax.
  *
  * Output JSON (subset of what project-scanner.md Phase 1 expects — the LLM
  * agent merges this with Step A's narrative fields and Step C's importMap to
@@ -81,7 +87,7 @@ try {
   core = await import(pathToFileURL(resolve(pluginRoot, 'packages/core/dist/index.js')).href);
 }
 
-const { createIgnoreFilter } = core;
+const { createIgnoreFilter, resolveUaDir } = core;
 
 // ---------------------------------------------------------------------------
 // Language detection
@@ -602,11 +608,15 @@ function buildDefaultsOnlyFilter() {
  * Determine whether `projectRoot` has any user .understandignore files.
  * When neither file exists, the combined and defaults-only filters are
  * identical, so we can skip the dual-filter accounting entirely.
+ *
+ * Mirrors core's createIgnoreFilter, which reads the resolved data dir —
+ * `.ua/`, or legacy `.understand-anything/` when that directory already
+ * exists (see resolveUaDir).
  */
 function hasUserIgnoreFile(projectRoot) {
   return (
     existsSync(join(projectRoot, '.understandignore'))
-    || existsSync(join(projectRoot, '.understand-anything', '.understandignore'))
+    || existsSync(join(resolveUaDir(projectRoot), '.understandignore'))
   );
 }
 
@@ -647,10 +657,25 @@ function countLines(absPath, posixPath) {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const [, , projectRoot, outputPath] = process.argv;
+  // Parse CLI arguments: <projectRoot> <outputPath> [--exclude <patterns>]
+  let projectRoot, outputPath, excludePatterns = [];
+  for (let i = 2; i < process.argv.length; i++) {
+    const arg = process.argv[i];
+    if (arg === '--exclude' && i + 1 < process.argv.length) {
+      excludePatterns = process.argv[++i]
+        .split(',')
+        .map(p => p.trim())
+        .filter(Boolean);
+    } else if (!projectRoot) {
+      projectRoot = arg;
+    } else if (!outputPath) {
+      outputPath = arg;
+    }
+  }
+
   if (!projectRoot || !outputPath) {
     process.stderr.write(
-      'Usage: node scan-project.mjs <projectRoot> <outputPath>\n',
+      'Usage: node scan-project.mjs <projectRoot> <outputPath> [--exclude <patterns>]\n',
     );
     process.exit(1);
   }
@@ -672,10 +697,10 @@ async function main() {
   // 1. Enumerate. Either git ls-files or recursive walk.
   const candidates = enumerateFiles(projectRoot);
 
-  // 2. Filter via createIgnoreFilter (defaults + user .understandignore).
+  // 2. Filter via createIgnoreFilter (defaults + user .understandignore + CLI --exclude).
   //    Build a defaults-only filter in parallel to count user-driven drops.
-  const combined = createIgnoreFilter(projectRoot);
-  const userIgnoresPresent = hasUserIgnoreFile(projectRoot);
+  const combined = createIgnoreFilter(projectRoot, excludePatterns);
+  const userIgnoresPresent = hasUserIgnoreFile(projectRoot) || excludePatterns.length > 0;
   const defaultsOnly = userIgnoresPresent ? buildDefaultsOnlyFilter() : combined;
 
   let filteredByIgnore = 0;

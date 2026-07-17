@@ -25,7 +25,7 @@ const requiredFreshnessInstructions = [
   "working-tree",
   "hash mismatch",
   "project diff is empty",
-  "Ignore `.understand-anything/`",
+  "Ignore the selected data directory (`.ua/` or legacy `.understand-anything/`)",
   "warn",
   "continue",
   "Run `/understand`",

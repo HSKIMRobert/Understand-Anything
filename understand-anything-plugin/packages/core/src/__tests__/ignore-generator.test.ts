@@ -208,23 +208,44 @@ describe("generateStarterIgnoreFile", () => {
       expect(content).toContain("# **/*Benchmark.cpp");
     });
 
+    it("includes Python pytest / unittest file patterns", () => {
+      const content = generateStarterIgnoreFile(testDir);
+      expect(content).toContain("# Python");
+      // pytest / unittest default discovery — file must start with test_.
+      expect(content).toContain("# **/test_*.py");
+      // Alternate convention used by tensorflow, google-style, etc.
+      expect(content).toContain("# **/*_test.py");
+    });
+
+    it("includes Django's single-file tests.py convention", () => {
+      const content = generateStarterIgnoreFile(testDir);
+      expect(content).toContain("# **/tests.py");
+    });
+
+    it("includes pytest conftest.py convention", () => {
+      const content = generateStarterIgnoreFile(testDir);
+      expect(content).toContain("# **/conftest.py");
+    });
+
     it("groups patterns under the JS / TS sub-header", () => {
       const content = generateStarterIgnoreFile(testDir);
       expect(content).toContain("# JS / TS");
     });
 
-    it("emits language groups in stable order: JS, C#, Java, Go, C++", () => {
+    it("emits language groups in stable order: JS, C#, Java, Go, C++, Python", () => {
       const content = generateStarterIgnoreFile(testDir);
       const jsIdx = content.indexOf("# JS / TS");
       const csIdx = content.indexOf("# C# / .NET");
       const javaIdx = content.indexOf("# Java / Kotlin");
       const goIdx = content.indexOf("# Go");
       const cppIdx = content.indexOf("# C++");
+      const pyIdx = content.indexOf("# Python");
       expect(jsIdx).toBeGreaterThan(-1);
       expect(csIdx).toBeGreaterThan(jsIdx);
       expect(javaIdx).toBeGreaterThan(csIdx);
       expect(goIdx).toBeGreaterThan(javaIdx);
       expect(cppIdx).toBeGreaterThan(goIdx);
+      expect(pyIdx).toBeGreaterThan(cppIdx);
     });
 
     it("keeps all suggestions commented even with no detected dirs and no .gitignore", () => {

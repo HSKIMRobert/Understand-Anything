@@ -475,6 +475,50 @@ describe('scan-project.mjs — .understandignore handling', () => {
   });
 });
 
+describe('scan-project.mjs — data-dir resolution (.ua vs legacy)', () => {
+  let projectRoot;
+
+  afterEach(() => {
+    if (projectRoot) {
+      rmSync(projectRoot, { recursive: true, force: true });
+      projectRoot = null;
+    }
+  });
+
+  it('honors .ua/.understandignore in a fresh project (no legacy dir)', () => {
+    // scan-project delegates ignore handling to core's createIgnoreFilter,
+    // which reads <resolveUaDir>/.understandignore — .ua/ for fresh projects.
+    projectRoot = setupTree({
+      '.ua/.understandignore': 'fixtures/\n',
+      'src/index.ts': 'export const x = 1;\n',
+      'fixtures/snap1.json': '{ "a": 1 }\n',
+      'fixtures/snap2.json': '{ "b": 2 }\n',
+    });
+    const r = runScript(projectRoot);
+    expect(r.status).toBe(0);
+    expect(byPath(r.output, 'fixtures/snap1.json')).toBeUndefined();
+    expect(byPath(r.output, 'fixtures/snap2.json')).toBeUndefined();
+    // Counted as user-driven drops (dual-filter accounting saw the ua ignore).
+    expect(r.output.filteredByIgnore).toBe(2);
+  });
+
+  it('honors legacy .understand-anything/.understandignore (legacy-compat)', () => {
+    // Legacy-compat regression: projects with an existing
+    // .understand-anything/ keep using it for the .understandignore lookup.
+    projectRoot = setupTree({
+      '.understand-anything/.understandignore': 'fixtures/\n',
+      'src/index.ts': 'export const x = 1;\n',
+      'fixtures/snap1.json': '{ "a": 1 }\n',
+      'fixtures/snap2.json': '{ "b": 2 }\n',
+    });
+    const r = runScript(projectRoot);
+    expect(r.status).toBe(0);
+    expect(byPath(r.output, 'fixtures/snap1.json')).toBeUndefined();
+    expect(byPath(r.output, 'fixtures/snap2.json')).toBeUndefined();
+    expect(r.output.filteredByIgnore).toBe(2);
+  });
+});
+
 describe('scan-project.mjs — special-file recognition', () => {
   let projectRoot;
 
